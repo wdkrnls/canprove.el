@@ -562,52 +562,115 @@ Otherwise return a list of atoms true in a falsifying assignment
     (can-prove-explain (car p) (cdr p))))
 
 ;;; ---------------------------------------------------------------------
-;;; Calc-backed simplification
+;;; Boolean simplification (direct pass, no Calc dependency)
 ;;; ---------------------------------------------------------------------
 
-(defcustom can-prove-calc-mode 'simplify
-  "Mode passed to `calc-eval' when simplifying formulas.
-If Calc rejects this symbol, try nil (full evaluation)."
-  :type 'symbol
-  :group 'can-prove)
-
-(defcustom can-prove-verify-simplification t
-  "Whether to verify that Calc's simplification is equivalent."
+(defcustom can-prove-simplify-demorgan nil
+  "Whether to push negations inward via De Morgan's laws.
+This is canonicalization (toward negation normal form), not strictly
+reduction, so it is off by default."
   :type 'boolean
   :group 'can-prove)
 
-(defun can-prove--to-calc (f)
-  "Translate normalized formula F into a Calc expression string."
+(defun can-prove--simplify-member (x list)
+  "Non-nil if X is `equal' to some element of LIST."
+  (seq-some (lambda (y) (equal x y)) list))
+
+(defun can-prove--simplify-negate (f)
+  "Return the simplified negation of F, which is assumed simplified."
+  (cond ((eq f t) nil)
+        ((null f) t)
+        ((and (consp f) (eq (car f) 'not)) (nth 1 f))
+        (t (list 'not f))))
+
+(defun can-prove--simplify-flatten (op f)
+  "Return the operands of F when F is an OP node, else (F)."
+  (if (and (consp f) (eq (car f) op))
+      (apply #'append
+             (mapcar (lambda (x) (can-prove--simplify-flatten op x))
+                     (cdr f)))
+    (list f)))
+
+(defun can-prove--simplify-sort (items)
+  "Sort ITEMS by printed representation, for canonical comparison."
+  (sort items (lambda (a b)
+                (string< (prin1-to-string a) (prin1-to-string b)))))
+
+(defun can-prove--simplify-rebuild (op items)
+  "Build a left-associated OP tree from ITEMS."
+  (let ((result (car items)))
+    (dolist (x (cdr items) result)
+      (setq result (list op result x)))))
+
+(defun can-prove--simplify-absorb (op items)
+  "Drop items of ITEMS subsumed by others under OP.
+Implements `x AND (x OR y) := x' and its dual."
+  (let ((dual (if (eq op 'and) 'or 'and)))
+    (seq-filter
+     (lambda (a)
+       (not (and (consp a)
+                 (eq (car a) dual)
+                 (seq-some (lambda (x) (can-prove--simplify-member x items))
+                           (cdr a)))))
+     items)))
+
+(defun can-prove--simplify-nary (op operands)
+  "Simplify OP applied to flat, pre-simplified OPERANDS."
+  (let* ((and-p (eq op 'and))
+         (absorbing (if and-p nil t))
+         (unit (if and-p t nil)))
+    (if (memq absorbing operands)
+        absorbing
+      (let ((unique nil) (conflict nil))
+        (dolist (x operands)
+          (unless (eq x unit)
+            (unless (can-prove--simplify-member x unique)
+              (if (can-prove--simplify-member
+                   (can-prove--simplify-negate x) unique)
+                  (setq conflict t)
+                (push x unique)))))
+        (cond
+         (conflict absorbing)
+         ((null unique) unit)
+         (t
+          (setq unique (can-prove--simplify-absorb
+                        op (can-prove--simplify-sort unique)))
+          (cond
+           ((null unique) unit)
+           ((null (cdr unique)) (car unique))
+           (t (can-prove--simplify-rebuild op unique)))))))))
+
+(defun can-prove--simplify-not (a)
+  "Simplify `(not A)', where A is already simplified."
   (cond
-   ((eq f t) "1")
-   ((null f) "0")
-   ((symbolp f) (symbol-name f))
-   (t (pcase (car f)
-        ('not (format "!(%s)" (can-prove--to-calc (nth 1 f))))
-        ('and (format "(%s) && (%s)"
-                     (can-prove--to-calc (nth 1 f))
-                     (can-prove--to-calc (nth 2 f))))
-        ('or  (format "(%s) || (%s)"
-                     (can-prove--to-calc (nth 1 f))
-                     (can-prove--to-calc (nth 2 f))))
-        (_ (error "Cannot translate %S to Calc syntax" f))))))
+   ((eq a t) nil)
+   ((null a) t)
+   ((and (consp a) (eq (car a) 'not)) (nth 1 a))          ; !!a := a
+   ((and can-prove-simplify-demorgan (consp a) (eq (car a) 'and))
+    (can-prove--simplify-nary 'or (mapcar #'can-prove--simplify-not (cdr a))))
+   ((and can-prove-simplify-demorgan (consp a) (eq (car a) 'or))
+    (can-prove--simplify-nary 'and (mapcar #'can-prove--simplify-not (cdr a))))
+   (t (list 'not a))))
+
+(defun can-prove--simplify (f)
+  "Simplify the normalized formula F using Boolean-algebra rules."
+  (cond
+   ((or (eq f t) (null f) (symbolp f)) f)
+   ((eq (car f) 'not)
+    (can-prove--simplify-not (can-prove--simplify (nth 1 f))))
+   ((memq (car f) '(and or))
+    (can-prove--simplify-nary
+     (car f)
+     (mapcar #'can-prove--simplify (can-prove--simplify-flatten (car f) f))))
+   (t (error "Not a normalized formula: %S" f))))
 
 (defun can-prove-simplify-formula (f)
-  "Return a formula equivalent to F, simplified by Calc.
+  "Return a formula equivalent to F, simplified by Boolean-algebra rules.
 F is normalized to and/or/not first, so the result is in that form."
-  (require 'calc)
-  (let* ((norm (can-prove--normalize f))
-         (str  (can-prove--to-calc norm))
-         (out  (condition-case err
-                   (can-prove-parse (calc-eval str can-prove-calc-mode))
-                 (error (error "Calc failed on %S: %s" str err)))))
-    (when (and can-prove-verify-simplification
-               (not (can-prove-tautology (list 'iff norm out))))
-      (error "Calc's simplification is not equivalent: %S -> %S" norm out))
-    out))
+  (can-prove--simplify (can-prove--normalize f)))
 
 (defun can-prove-simplify (premises conclusion)
-  "Return (PREMISES . CONCLUSION) with each formula simplified by Calc."
+  "Return (PREMISES . CONCLUSION) with each formula simplified."
   (cons (mapcar #'can-prove-simplify-formula premises)
         (can-prove-simplify-formula conclusion)))
 
