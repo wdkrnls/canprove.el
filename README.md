@@ -58,7 +58,7 @@ Connectives, with `¬` binding tightest and `≡` loosest:
 | not | `¬` `~` `!` `-` `not` |
 | and | `*` `∧` `&&` `/\` `&` `and` |
 | or | `+` `∨` `||` `\/` `\|` `or` |
-| implies | `⊃` `->` `=>` `→` `implies` |
+| implies | `⊃` `->` `=>` `→` `then` `implies` |
 | iff | `≡` `<=>` `<->` `↔` `iff` `equiv` |
 | xor | `⊕` `xor` |
 
@@ -102,4 +102,4 @@ The suite checks the parser, the validity and counterexample results, and both b
 
 ## License
 
-Add your preferred license here.
+GPL 3+
