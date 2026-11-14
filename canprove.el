@@ -45,7 +45,6 @@
 
 (require 'seq)
 (require 'subr-x)                       ; string-trim-right
-(require 'calc)                         ; simplify
 
 ;;; ---------------------------------------------------------------------
 ;;; Normalization
