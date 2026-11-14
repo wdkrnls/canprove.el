@@ -27,8 +27,8 @@ Put `can-prove.el` on your `load-path` and:
 
 ```elisp
 (can-prove '((implies p q) p) 'q)              ; => t        (modus ponens)
-(can-prove-counterexample '((implies p q)) 'q) ; => ()       (p=f, q=f)
-(can-prove-counterexample '((implies p q) q) 'p) ; => (q)    (p=f, q=t)
+(can-prove-counterexample '((implies p q)) 'q) ; => ()       (p=0, q=1)
+(can-prove-counterexample '((implies p q) q) 'p) ; => (q)    (p=1, q=1)
 (can-prove-tautology '(or p (not p)))          ; => t        (excluded middle)
 ```
 
